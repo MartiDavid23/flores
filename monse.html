@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flores para Monse 🌻</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  #c { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H, groundY;
+let t0 = null, elapsed = 0;
+let stars = [], grassOC = null, flowers = [], textPetals = [], floatPetals = [], sparkles = [];
+
+/* ─── helpers ─── */
+const R  = (a, b) => a + Math.random() * (b - a);
+const Ri = (a, b) => Math.floor(R(a, b + 1));
+
+/* ─── STARS ─── */
+function makeStars() {
+  stars = Array.from({ length: 220 }, () => ({
+    x: R(0, W), y: R(0, H * 0.62),
+    r: R(0.2, 1.9), ph: R(0, Math.PI * 2), spd: R(0.008, 0.028)
+  }));
+}
+
+/* ─── GRASS (pre-rendered offscreen) ─── */
+function makeGrass() {
+  grassOC = document.createElement('canvas');
+  grassOC.width  = W;
+  grassOC.height = H - groundY + 40;
+  const gc = grassOC.getContext('2d');
+  for (let x = 3; x < W; x += R(5, 12)) {
+    const h    = R(7, 24);
+    const lean = R(-12, 12);
+    const hue  = R(95, 118);
+    const lt   = R(22, 34);
+    gc.save();
+    gc.strokeStyle = `hsl(${hue}, 65%, ${lt}%)`;
+    gc.lineWidth   = R(0.9, 1.6);
+    gc.lineCap     = 'round';
+    gc.beginPath();
+    gc.moveTo(x, grassOC.height);
+    gc.quadraticCurveTo(x + lean * 0.5, grassOC.height - h * 0.55, x + lean, grassOC.height - h);
+    gc.stroke();
+    gc.restore();
+  }
+}
+
+/* ─── FLOWER ─── */
+class Flower {
+  constructor(x, idx) {
+    this.x       = x;
+    this.size    = R(22, 40);
+    this.stemH   = this.size * R(2.8, 3.7);
+    this.petals  = Ri(10, 14);
+    this.hue     = R(38, 52);
+    this.swayFq  = R(0.55, 1.0);
+    this.swayAmp = R(2, 4.5);
+    this.swayOff = R(0, Math.PI * 2);
+    this.sway    = 0;
+    this.growP   = 0;
+    this.bloomP  = 0;
+    this.growSt  = 0.4 + idx * R(0.28, 0.45);
+    this.bloomSt = this.growSt + R(0.9, 1.4);
+    this.leaves  = [
+      { t: R(0.30, 0.50), d:  1, sz: this.size * R(0.5, 0.75), hue: R(95, 115), lt: R(23, 32) },
+      { t: R(0.55, 0.75), d: -1, sz: this.size * R(0.5, 0.75), hue: R(95, 115), lt: R(23, 32) }
+    ];
+  }
+  get tip() { return { x: this.x + this.sway, y: groundY - this.stemH * this.growP }; }
+
+  update(t) {
+    if (t > this.growSt)  this.growP  = Math.min(1, (t - this.growSt)  / 1.4);
+    if (t > this.bloomSt) this.bloomP = Math.min(1, (t - this.bloomSt) / 1.0);
+    this.sway = Math.sin(t * this.swayFq + this.swayOff) * this.swayAmp * Math.min(1, this.growP * 2);
+  }
+
+  draw() {
+    if (this.growP <= 0) return;
+    const { x: tx, y: ty } = this.tip;
+
+    /* stem */
+    ctx.save();
+    const sg = ctx.createLinearGradient(this.x, groundY, tx, ty);
+    sg.addColorStop(0, '#1e4000');
+    sg.addColorStop(1, '#52a800');
+    ctx.strokeStyle = sg;
+    ctx.lineWidth   = Math.max(2, this.size * 0.13);
+    ctx.lineCap     = 'round';
+    ctx.beginPath();
+    ctx.moveTo(this.x, groundY);
+    ctx.quadraticCurveTo(this.x + this.sway * 0.35, groundY - this.stemH * this.growP * 0.5, tx, ty);
+    ctx.stroke();
+
+    /* leaves */
+    if (this.growP > 0.2) {
+      this.leaves.forEach(lf => {
+        const lp = Math.min(1, (this.growP - 0.2) / 0.6);
+        const lx = this.x + this.sway * lf.t;
+        const ly = groundY - this.stemH * this.growP * lf.t;
+        ctx.save();
+        ctx.translate(lx, ly);
+        ctx.rotate(lf.d * 0.75);
+        ctx.fillStyle = `hsl(${lf.hue}, 65%, ${lf.lt}%)`;
+        ctx.beginPath();
+        ctx.ellipse(lf.d * lf.sz * 0.5 * lp, 0, lf.sz * 0.5 * lp, lf.sz * 0.22 * lp, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
+    }
+    ctx.restore();
+
+    if (this.bloomP <= 0) return;
+
+    /* bloom */
+    ctx.save();
+    ctx.translate(tx, ty);
+    const pL = this.size * this.bloomP;
+    const pW = pL * 0.42;
+
+    for (let i = 0; i < this.petals; i++) {
+      const ang = (i / this.petals) * Math.PI * 2 + 0.18;
+      ctx.save();
+      ctx.rotate(ang);
+      const pg = ctx.createLinearGradient(0, 0, 0, -pL);
+      pg.addColorStop(0,   `hsl(${this.hue + 6},  100%, 44%)`);
+      pg.addColorStop(0.55, `hsl(${this.hue},      100%, 60%)`);
+      pg.addColorStop(1,   `hsl(${this.hue - 4},  95%,  78%)`);
+      ctx.fillStyle = pg;
+      ctx.beginPath();
+      ctx.ellipse(0, -pL * 0.56, pW * 0.37, pL * 0.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    /* center glow */
+    const cr = this.size * 0.37 * this.bloomP;
+    ctx.shadowColor = `hsl(${this.hue}, 100%, 62%)`;
+    ctx.shadowBlur  = cr * 2;
+    const cg = ctx.createRadialGradient(-cr * 0.1, -cr * 0.1, 0, 0, 0, cr);
+    cg.addColorStop(0,   '#FFFDE4');
+    cg.addColorStop(0.3, '#FFD000');
+    cg.addColorStop(0.65,'#E65100');
+    cg.addColorStop(1,   '#6D2000');
+    ctx.fillStyle = cg;
+    ctx.beginPath();
+    ctx.arc(0, 0, cr, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* ─── SAMPLE TEXT ─── */
+function sampleText(text, fontSize, yOffset, fontStyle = 'bold') {
+  const oc  = document.createElement('canvas');
+  oc.width  = W;
+  oc.height = Math.ceil(fontSize * 1.45);
+  const oc2 = oc.getContext('2d');
+  oc2.font          = `${fontStyle} ${fontSize}px Georgia, 'Times New Roman', serif`;
+  oc2.textAlign     = 'center';
+  oc2.textBaseline  = 'middle';
+  oc2.fillStyle     = '#fff';
+  oc2.fillText(text, W / 2, oc.height / 2);
+  const d    = oc2.getImageData(0, 0, W, oc.height).data;
+  const pts  = [];
+  const step = 10;
+  const yOff = yOffset ?? H * 0.045;
+  for (let y = 0; y < oc.height; y += step)
+    for (let x = 0; x < W; x += step)
+      if (d[(y * W + x) * 4 + 3] > 100)
+        pts.push({ tx: x, ty: y + yOff });
+  return pts;
+}
+
+/* ─── TEXT PETAL ─── */
+class TextPetal {
+  constructor(src, tx, ty, opts = {}) {
+    this.src  = src;
+    this.tx   = tx;  this.ty   = ty;
+    this.x    = src.x; this.y = groundY;
+    this.size = R(3.2, 5.8);
+    this.ang  = R(0, Math.PI * 2);
+    this.as   = R(-0.055, 0.055);
+    this.alpha  = 0;
+    this.hue    = R(opts.hueMin ?? 38, opts.hueMax ?? 58);
+    this.lt     = R(opts.ltMin  ?? 58, opts.ltMax  ?? 78);
+    this.onAt   = R(opts.onAtMin ?? 3.0, opts.onAtMax ?? 7.8);
+    this.phase  = 'wait';
+    this.bob    = R(0, Math.PI * 2);
+  }
+
+  update(t) {
+    if (t < this.onAt) return;
+    if (this.phase === 'wait') {
+      this.phase = 'fly';
+      const tip = this.src.tip;
+      this.x = tip.x + R(-18, 18);
+      this.y = tip.y + R(-6, 6);
+    }
+    this.ang += this.as;
+    if (this.phase === 'fly') {
+      const dx = this.tx - this.x, dy = this.ty - this.y;
+      const d  = Math.sqrt(dx * dx + dy * dy);
+      const spd = Math.min(0.1, 0.038 + d * 0.0008);
+      this.x    += dx * spd;
+      this.y    += dy * spd;
+      this.alpha = Math.min(1, this.alpha + 0.045);
+      if (d < 2) { this.phase = 'rest'; this.x = this.tx; this.y = this.ty; }
+    } else {
+      this.x     = this.tx + Math.sin(elapsed * 0.65 + this.bob) * 1.3;
+      this.y     = this.ty + Math.cos(elapsed * 0.48 + this.bob) * 1.3;
+      this.alpha = 0.82 + 0.18 * Math.sin(elapsed * 2.1 + this.bob);
+    }
+  }
+
+  draw() {
+    if (this.alpha < 0.01) return;
+    ctx.save();
+    ctx.globalAlpha = this.alpha;
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.ang);
+    ctx.shadowColor = `hsl(${this.hue}, 100%, 72%)`;
+    ctx.shadowBlur  = this.size * 3;
+    const g = ctx.createRadialGradient(0, -this.size * 0.25, 0, 0, 0, this.size);
+    g.addColorStop(0, `hsl(${this.hue + 12}, 100%, ${this.lt + 14}%)`);
+    g.addColorStop(1, `hsl(${this.hue},      100%, ${this.lt}%)`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, this.size * 0.44, this.size, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* ─── FLOATING PETAL ─── */
+class FloatPetal {
+  constructor(init) { this.reset(init); }
+  reset(init) {
+    this.x     = R(0, W);
+    this.y     = init ? R(-20, H) : -20;
+    this.s     = R(2, 6.5);
+    this.vx    = R(-0.7, 0.7);
+    this.vy    = R(0.35, 1.4);
+    this.a     = R(0, Math.PI * 2);
+    this.as    = R(-0.035, 0.035);
+    this.alpha = R(0.22, 0.58);
+    this.hue   = R(36, 56);
+    this.w     = R(0, Math.PI * 2);
+  }
+  update() {
+    this.w += 0.022;
+    this.x += this.vx + Math.sin(this.w) * 0.38;
+    this.y += this.vy;
+    this.a += this.as;
+    if (this.y > H + 22) this.reset(false);
+  }
+  draw() {
+    ctx.save();
+    ctx.globalAlpha = this.alpha;
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.a);
+    ctx.shadowColor = `hsl(${this.hue}, 100%, 65%)`;
+    ctx.shadowBlur  = 5;
+    ctx.fillStyle   = `hsl(${this.hue}, 100%, 60%)`;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, this.s * 0.4, this.s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* ─── SPARKLE ─── */
+class Sparkle {
+  constructor() { this.reset(); }
+  reset() {
+    this.x     = R(W * 0.04, W * 0.96);
+    this.y     = R(H * 0.01, H * 0.30);
+    this.s     = R(1, 3.8);
+    this.ph    = R(0, Math.PI * 2);
+    this.spd   = R(0.7, 2.2);
+    this.onAt  = R(5, 14);
+    this.born  = false;
+  }
+  update(t) {
+    if (t < this.onAt) return;
+    this.born = true;
+    this.ph  += 0.042 * this.spd;
+    if (this.ph > Math.PI * 7) this.reset();
+  }
+  draw() {
+    if (!this.born) return;
+    const a = Math.max(0, Math.sin(this.ph) * 0.92);
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.translate(this.x, this.y);
+    ctx.shadowColor = 'rgba(255,230,80,1)';
+    ctx.shadowBlur  = this.s * 4.5;
+    ctx.fillStyle   = '#FFF8A0';
+    ctx.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const ang = (i / 8) * Math.PI * 2;
+      const r   = i % 2 === 0 ? this.s : this.s * 0.32;
+      const fn  = i === 0 ? 'moveTo' : 'lineTo';
+      ctx[fn](Math.cos(ang) * r, Math.sin(ang) * r);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* ─── BACKGROUND ─── */
+function drawBg() {
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0,    '#01000d');
+  bg.addColorStop(0.42, '#06031c');
+  bg.addColorStop(0.72, '#070e00');
+  bg.addColorStop(1,    '#101e00');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  /* warm halo behind MONSE */
+  const gx  = W / 2, gy = H * 0.15;
+  const glo = ctx.createRadialGradient(gx, gy, 0, gx, gy, W * 0.48);
+  glo.addColorStop(0,   'rgba(255,210,55,0.10)');
+  glo.addColorStop(0.5, 'rgba(255,190,30,0.04)');
+  glo.addColorStop(1,   'rgba(255,170,0,0)');
+  ctx.fillStyle = glo;
+  ctx.fillRect(0, 0, W, H);
+
+  /* rose halo behind "te amo" */
+  const rx  = W / 2, ry = H * 0.46;
+  const rlo = ctx.createRadialGradient(rx, ry, 0, rx, ry, W * 0.38);
+  rlo.addColorStop(0,   'rgba(255,80,160,0.09)');
+  rlo.addColorStop(0.5, 'rgba(220,50,130,0.04)');
+  rlo.addColorStop(1,   'rgba(200,30,110,0)');
+  ctx.fillStyle = rlo;
+  ctx.fillRect(0, 0, W, H);
+
+  /* twinkling stars */
+  stars.forEach(s => {
+    s.ph += s.spd;
+    const a = (0.25 + 0.75 * (0.5 + 0.5 * Math.sin(s.ph))).toFixed(2);
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,255,218,${a})`;
+    ctx.fill();
+  });
+}
+
+/* ─── GROUND ─── */
+function drawGround() {
+  const gg = ctx.createLinearGradient(0, groundY, 0, H);
+  gg.addColorStop(0,    '#275000');
+  gg.addColorStop(0.18, '#163200');
+  gg.addColorStop(1,    '#040900');
+  ctx.fillStyle = gg;
+  ctx.beginPath();
+  ctx.moveTo(0, groundY + 5);
+  for (let x = 0; x <= W; x += 28) ctx.lineTo(x, groundY + 5 + Math.sin(x * 0.09) * 4);
+  ctx.lineTo(W, H); ctx.lineTo(0, H);
+  ctx.closePath();
+  ctx.fill();
+
+  /* glowing edge */
+  ctx.save();
+  ctx.shadowColor = '#3a7a00';
+  ctx.shadowBlur  = 10;
+  ctx.strokeStyle = '#3d7800';
+  ctx.lineWidth   = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(0, groundY + 5);
+  for (let x = 0; x <= W; x += 28) ctx.lineTo(x, groundY + 5 + Math.sin(x * 0.09) * 4);
+  ctx.stroke();
+  ctx.restore();
+
+  /* pre-rendered grass */
+  if (grassOC) ctx.drawImage(grassOC, 0, groundY - 5);
+}
+
+/* ─── INIT ─── */
+function init() {
+  groundY = H * 0.80;
+  makeStars();
+  makeGrass();
+
+  flowers = [];
+  const slots = [0.05, 0.12, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.88, 0.95];
+  slots.forEach((s, i) => flowers.push(new Flower(W * s + R(-14, 14), i)));
+
+  const fs    = Math.min(H * 0.21, W * 0.17, 215);
+  const fsAmo = Math.min(H * 0.12, W * 0.10, 125);
+  const monseBottom = H * 0.045 + fs * 1.45;
+
+  textPetals = [];
+
+  // MONSE — pétalos amarillos dorados
+  sampleText('MONSE', fs, H * 0.045).forEach(pt => {
+    textPetals.push(new TextPetal(flowers[Ri(0, flowers.length - 1)], pt.tx, pt.ty));
+  });
+
+  // te amo — pétalos rosa/fucsia, aparecen después
+  sampleText('te amo', fsAmo, monseBottom + H * 0.022, 'bold italic').forEach(pt => {
+    textPetals.push(new TextPetal(flowers[Ri(0, flowers.length - 1)], pt.tx, pt.ty, {
+      hueMin: 330, hueMax: 355,
+      ltMin:  62,  ltMax:  80,
+      onAtMin: 8.5, onAtMax: 14.0
+    }));
+  });
+
+  floatPetals = Array.from({ length: 38 }, () => new FloatPetal(true));
+  sparkles    = Array.from({ length: 65 }, () => new Sparkle());
+}
+
+/* ─── LOOP ─── */
+function loop(ts) {
+  if (!t0) t0 = ts;
+  elapsed = (ts - t0) / 1000;
+
+  ctx.clearRect(0, 0, W, H);
+  drawBg();
+  drawGround();
+
+  flowers.forEach(f => { f.update(elapsed); f.draw(); });
+  textPetals.forEach(p => { p.update(elapsed); p.draw(); });
+  floatPetals.forEach(p => { p.update(); p.draw(); });
+  sparkles.forEach(s => { s.update(elapsed); s.draw(); });
+
+  requestAnimationFrame(loop);
+}
+
+/* ─── START ─── */
+function start() {
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  t0 = null;
+  init();
+}
+
+window.addEventListener('resize', start);
+start();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
