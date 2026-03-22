@@ -171,7 +171,7 @@ function sampleText(text, fontSize, yOffset, fontStyle = 'bold') {
   oc2.fillText(text, W / 2, oc.height / 2);
   const d    = oc2.getImageData(0, 0, W, oc.height).data;
   const pts  = [];
-  const step = 10;
+  const step = 5;
   const yOff = yOffset ?? H * 0.045;
   for (let y = 0; y < oc.height; y += step)
     for (let x = 0; x < W; x += step)
@@ -420,6 +420,62 @@ function init() {
   sparkles    = Array.from({ length: 65 }, () => new Sparkle());
 }
 
+/* ─── TEXT OUTLINES ─── */
+function drawTextOutlines(t) {
+  const fs         = Math.min(H * 0.21, W * 0.17, 215);
+  const fsAmo      = Math.min(H * 0.12, W * 0.10, 125);
+  const monseCY    = H * 0.045 + fs * 0.725;
+  const teAmoCY    = H * 0.045 + fs * 1.45 + H * 0.022 + fsAmo * 0.725;
+
+  ctx.save();
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+
+  /* — MONSE — */
+  const aM = Math.min(1, Math.max(0, (t - 0.4) / 1.2));
+  if (aM > 0) {
+    ctx.globalAlpha = aM;
+    ctx.font        = `bold ${fs}px Georgia, 'Times New Roman', serif`;
+    ctx.lineJoin    = 'round';
+
+    /* outer glow stroke */
+    ctx.strokeStyle = 'rgba(255,180,0,0.35)';
+    ctx.lineWidth   = fs * 0.055;
+    ctx.shadowColor = 'rgba(255,210,60,0.9)';
+    ctx.shadowBlur  = fs * 0.12;
+    ctx.strokeText('MONSE', W / 2, monseCY);
+
+    /* crisp inner stroke */
+    ctx.strokeStyle = '#FFD700';
+    ctx.lineWidth   = fs * 0.025;
+    ctx.shadowColor = 'rgba(255,230,100,1)';
+    ctx.shadowBlur  = fs * 0.04;
+    ctx.strokeText('MONSE', W / 2, monseCY);
+  }
+
+  /* — te amo — */
+  const aT = Math.min(1, Math.max(0, (t - 7.2) / 1.8));
+  if (aT > 0) {
+    ctx.globalAlpha = aT;
+    ctx.font        = `bold italic ${fsAmo}px Georgia, 'Times New Roman', serif`;
+    ctx.lineJoin    = 'round';
+
+    ctx.strokeStyle = 'rgba(255,80,160,0.35)';
+    ctx.lineWidth   = fsAmo * 0.055;
+    ctx.shadowColor = 'rgba(255,100,180,0.9)';
+    ctx.shadowBlur  = fsAmo * 0.12;
+    ctx.strokeText('te amo', W / 2, teAmoCY);
+
+    ctx.strokeStyle = '#FF69B4';
+    ctx.lineWidth   = fsAmo * 0.025;
+    ctx.shadowColor = 'rgba(255,160,210,1)';
+    ctx.shadowBlur  = fsAmo * 0.04;
+    ctx.strokeText('te amo', W / 2, teAmoCY);
+  }
+
+  ctx.restore();
+}
+
 /* ─── LOOP ─── */
 function loop(ts) {
   if (!t0) t0 = ts;
@@ -430,6 +486,7 @@ function loop(ts) {
   drawGround();
 
   flowers.forEach(f => { f.update(elapsed); f.draw(); });
+  drawTextOutlines(elapsed);
   textPetals.forEach(p => { p.update(elapsed); p.draw(); });
   floatPetals.forEach(p => { p.update(); p.draw(); });
   sparkles.forEach(s => { s.update(elapsed); s.draw(); });
